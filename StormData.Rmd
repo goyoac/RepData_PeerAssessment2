@@ -1,0 +1,193 @@
+# Analysis of severe weather events in United States through NOAA Storm Database exploration.
+
+By Gregorio Ambrosio Cestero
+December 24, 2015
+
+This report explores the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database to investigate the types of severe weather events that have the largest impact to public health, and those types that result on property and crop damage. This study focus on the 1994-2011 period in which more complete records are kept for severe weather events. Also, this study is based on aggregation of weather events in categories to allow a more consistently view of data. From this study it can be concluded that heat and storm related weather events are the most dangerous to people, while rain and heat are the most costly event type categories to the economy.
+
+## Data Processing
+
+### Loading data
+First of all, we try to download the file if it isn't in the workspace. Then store it in the StormData variable.
+
+```{r, echo = TRUE, cache = TRUE}
+filename <- "repdata-data-StormData.csv.bz2"
+if (!file.exists(filename)) {
+        fileurl <- "http://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+        download.file(fileurl, filename, "auto")
+}
+StormData <- read.csv(filename)
+```
+There are `r nrow(StormData)` rows and `r ncol(StormData)` cols in the database.The events in the database start in the year 1950 and end in November 2011. In the earlier years of the database there are generally fewer events recorded, most likely due to a lack of good records. More recent years should be considered more complete.
+
+### Data exploration: reducing data set
+
+In order to get a more tractable dataset respect to processing time we just keep the columns needed for the analysis
+
+```{r, echo = TRUE, cache = TRUE}
+StormData <- StormData[, c("BGN_DATE", "EVTYPE", "FATALITIES", "INJURIES", "PROPDMG", "PROPDMGEXP", "CROPDMG", "CROPDMGEXP")]
+```
+
+The events in the database are recorded from 1950 to 2011 but in the next histogram we can observe data in the first years in which there are fewer events recorded, however recent years are more complete with more records.
+
+```{r, echo = TRUE, cache = TRUE}
+StormData$YEAR <- as.numeric(format(as.Date(StormData$BGN_DATE, format = "%m/%d/%Y"), "%Y"))
+hist(StormData$YEAR, breaks = 50, main = "Histogram of events per year", xlab="Year", col="azure3")
+```
+
+Based on the graph, we select the subset from 1994 to 2011. Due to year 1994 which is the first year with an generous increase in events, so we can expect a more consistent balance among event types.
+
+```{r, echo = TRUE, cache = TRUE}
+StormData <- StormData[StormData$YEAR >= 1994, ]
+```
+
+Now we have `r nrow(StormData)` rows and `r ncol(StormData)` cols in the database
+
+### Processing data to get the most harmful events with respect to population health
+
+If we observe the event types, there are a lot of not consistent names, possibly for similar, if not equal, same event type. For example, we can observe "EXCESSIVE HEAT", "HEAT", "RECORD HEAT" and so on, perhaps for the same event type.
+
+We are looking for the most harmful events so we aggregate the number of fatalities and injuries per event type.
+
+```{r, echo = TRUE}
+library(plyr)
+
+fatalities <- ddply(StormData, "EVTYPE", summarize, QTY = sum(FATALITIES, na.rm = T))
+fatalities <- arrange(fatalities,fatalities[,2],decreasing = T)
+head (fatalities, n = 20)
+
+injuries <- ddply(StormData, "EVTYPE", summarize, QTY = sum(INJURIES, na.rm = T))
+injuries <- arrange(injuries,injuries[,2],decreasing = T)
+head (injuries, n = 20)
+```
+
+But to deal with the inconsistencies in event names we prefer to summarize them in ten categories 
+
+```{r, echo = TRUE, cache = TRUE}
+StormData[grepl("HEAT|WARM|DRY|HOT|DROUGHT|HYPERTHERMIA",StormData$EVTYPE, ignore.case = TRUE), "EVCATEGORY"] <- "HEAT"
+StormData[grepl("COLD|COOL|HYPOTHERMIA|WINT|ICE|SNOW|BLIZZARD|FREEZ|ICY|FROST",StormData$EVTYPE, ignore.case = TRUE), "EVCATEGORY"] <- "COLD"                
+StormData[grepl("FLOOD|FLD|RAIN|PRECIP",StormData$EVTYPE, ignore.case = TRUE), "EVCATEGORY"] <- "RAIN"
+StormData[grepl("COASTAL|TSUNAMI|CURRENT|MARINE|WATER|SURF|SLEET|SEAS|WAVES|SWELLS|BEACH",StormData$EVTYPE, ignore.case = TRUE), "EVCATEGORY"] <- "SEA"
+StormData[grepl("STORM|TSTM|HAIL|LIGH|TORNADO",StormData$EVTYPE, ignore.case = TRUE), "EVCATEGORY"] <- "STORM"
+StormData[grepl("TROPICAL|TYPHOON|HURRICANE",StormData$EVTYPE, ignore.case = TRUE), "EVCATEGORY"] <- "TROPICAL"
+StormData[grepl("WIND|BURST",StormData$EVTYPE, ignore.case = TRUE), "EVCATEGORY"] <- "WIND"
+StormData[grepl("FIRE",StormData$EVTYPE, ignore.case = TRUE), "EVCATEGORY"] <- "FIRE"
+StormData[grepl("SLIDE|AVALANCHE",StormData$EVTYPE, ignore.case = TRUE), "EVCATEGORY"] <- "SLIDE"
+StormData[is.na(StormData$EVCATEGORY),"EVCATEGORY"] <- "OTHER"
+```
+
+Now we have a more consistent view by event categories
+
+```{r, echo = TRUE}
+fatalities <- ddply(StormData, "EVCATEGORY", summarize, QTY = sum(FATALITIES, na.rm = T))
+print(fatalities)
+
+injuries <- ddply(StormData, "EVCATEGORY", summarize, QTY = sum(INJURIES, na.rm = T))
+print(injuries)
+```
+
+### Processing date to study the economic consequences
+
+We need to convert the property damage and crop damage data into comparable numerical forms according to the meaning of units described in the code book. PROPDMGEXP and CROPDMGEXP columns mean a multiplier for each observation where Hundred (H), Thousand (K), Million (M) and Billion (B).
+
+```{r, echo = TRUE, warning = FALSE}
+StormData$PROPDMGEXP <- as.character(StormData$PROPDMGEXP)
+StormData$PROPDMGEXP[toupper(StormData$PROPDMGEXP) == "B"] <- "9"
+StormData$PROPDMGEXP[toupper(StormData$PROPDMGEXP) == "M"] <- "6"
+StormData$PROPDMGEXP[toupper(StormData$PROPDMGEXP) == "K"] <- "3"
+StormData$PROPDMGEXP[toupper(StormData$PROPDMGEXP) == "H"] <- "2"
+StormData$PROPDMGEXP[toupper(StormData$PROPDMGEXP) == ""] <- "0"
+StormData$PROPDMGEXP = as.numeric(StormData$PROPDMGEXP)
+StormData$PROPDMGEXP[is.na(StormData$PROPDMGEXP)] <- 0
+StormData$PROPDMGUNITS <- StormData$PROPDMG * 10^StormData$PROPDMGEXP
+
+
+StormData$CROPDMGEXP <- as.character(StormData$CROPDMGEXP)
+StormData$CROPDMGEXP[toupper(StormData$CROPDMGEXP) == "B"] <- "9"
+StormData$CROPDMGEXP[toupper(StormData$CROPDMGEXP) == "M"] <- "6"
+StormData$CROPDMGEXP[toupper(StormData$CROPDMGEXP) == "K"] <- "3"
+StormData$CROPDMGEXP[toupper(StormData$CROPDMGEXP) == "H"] <- "2"
+StormData$CROPDMGEXP[toupper(StormData$CROPDMGEXP) == ""] <- "0"
+StormData$CROPDMGEXP = as.numeric(StormData$CROPDMGEXP)
+StormData$CROPDMGEXP[is.na(StormData$CROPDMGEXP)] <- 0
+StormData$CROPDMGUNITS <- StormData$CROPDMG * 10^StormData$CROPDMGEXP
+```
+
+```{r, echo = TRUE}
+propdmg <- ddply(StormData, "EVCATEGORY", summarize, QTY = sum(PROPDMGUNITS, na.rm = T))
+print(propdmg)
+
+cropdmg <- ddply(StormData, "EVCATEGORY", summarize, QTY = sum(CROPDMGUNITS, na.rm = T))
+print(cropdmg)
+```
+
+
+
+
+## Results
+Now, after processing data, we are in the best position to present results to answer the following questions respect to the U.S.:
+
+1. Which types of events are most harmful with respect to population health?
+2. which types of events have the greatest economic consequences?
+
+###Largest Impact to Public Health
+We begin, reordering fatalities and injuries and plot them to get the most harmhul events by category
+
+```{r, echo = TRUE}
+library(ggplot2)
+library(grid)
+library(gridExtra)
+
+fatalities <- arrange(fatalities,fatalities[,2],decreasing = F)
+fatalities$EVCATEGORY <- factor(fatalities$EVCATEGORY, levels=rev(fatalities$EVCATEGORY))
+
+injuries <- arrange(injuries,injuries[,2],decreasing = F)
+injuries$EVCATEGORY <- factor(injuries$EVCATEGORY, levels=rev(injuries$EVCATEGORY))
+
+
+g.fatalities <- qplot(EVCATEGORY, data = fatalities, weight = QTY, geom = "bar") + 
+        theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+        xlab("Weather Event Category") +
+        scale_y_continuous("Number of Fatalities")+ 
+        ggtitle("Total Fatalities by\n Weather Events in\n the U.S. from 1994 - 2011")
+
+g.injuries <- qplot(EVCATEGORY, data = injuries, weight = QTY, geom = "bar") + 
+        theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+        xlab("Weather Event Category") +
+        scale_y_continuous("Number of Injuries") + 
+        ggtitle("Total Injuries by \n Weather Events in\n the U.S. from 1994 - 2011")
+
+grid.arrange(g.fatalities, g.injuries, ncol = 2)
+```
+
+We can observe that the aggregation of heat related weather events are the deadliest, followed by storm and rain related events. However, regarding injuries, we can see that related storms events have the largest effects on population health with a big distance to a second group of categories such as heat, rain and wind.
+
+###Largest economic impact on properties and crops
+As previously, we reorder the property and crop damages to plot them in an useful way that enable us to answer about the type of events that have the largest economic consequences.
+
+```{r, echo = TRUE}
+propdmg <- arrange(propdmg,propdmg[,2],decreasing = F)
+propdmg$EVCATEGORY <- factor(propdmg$EVCATEGORY, levels=rev(propdmg$EVCATEGORY))
+
+cropdmg <- arrange(cropdmg,cropdmg[,2],decreasing = F)
+cropdmg$EVCATEGORY <- factor(cropdmg$EVCATEGORY, levels=rev(cropdmg$EVCATEGORY))
+
+g.propdmg <- qplot(EVCATEGORY, data = propdmg, weight = QTY/1000000, geom = "bar") + 
+        theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+        xlab("Weather Event Category") +
+        scale_y_continuous("Property Damage in US dollars (in Millions)") + 
+        ggtitle("Total Property Damage by\nWeather Events in\n the U.S. from 1994 - 2011")
+
+g.cropdmg <- qplot(EVCATEGORY, data = cropdmg, weight = QTY/1000000, geom = "bar") + 
+        theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+        xlab("Weather Event Category") + 
+        scale_y_continuous("Crop Damage in US dollars (in Millions)") + 
+        ggtitle("Total Crop Damage by \nWeather Events in\n the U.S. from 1994 - 2011")
+
+grid.arrange(g.propdmg, g.cropdmg, ncol = 2)
+```
+
+Regarding to property damage we can see that related rain events are the most damaging in an economic sense followed by a second group of  categories such as storm and tropical events. On the other hand, regarding to crop damage, the most damaging event category is heat followed distantly by the storm, rain and tropical categories. 
+ 
+
+
